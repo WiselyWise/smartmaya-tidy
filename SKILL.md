@@ -1,107 +1,67 @@
 ---
 name: smartmaya-tidy
-description: "Audit a Google Drive for duplicate files and storage bloat, and safely clean it up with the owner's approval. Trigger on: \"my Google Drive is full\", \"find duplicate files\", \"clean up my drive\", \"storage is full\", \"declutter my drive\", \"why is my Drive so full\", \"free up Google Drive space\", or any request to find/remove duplicate files in a connected Google Drive. Produces an XLSX audit report before touching anything, and only deletes (to Trash, never permanently) after explicit, itemized owner approval."
+description: "Audit a connected Google Drive for likely duplicate files and storage bloat. Trigger on: 'my Google Drive is full', 'find duplicate files', 'storage is full', 'declutter my Drive', 'why is my Drive so full', 'free up Google Drive space', or requests for a duplicate-file or storage audit. Produces an XLSX report only. This skill is read-only and must never delete, move, rename, or modify Drive files."
 license: MIT
 ---
 
-# Smart Maya Tidy — Google Drive duplicate & storage audit
+# Smart Maya Tidy — Google Drive duplicate and storage audit
 
-Finds duplicate files across an entire Google Drive account, explains exactly what it found and
-why it's confident, and only removes anything after the owner explicitly approves — moving
-files to Trash (recoverable ~30 days), never permanent deletion.
+Audit a connected Google Drive for likely duplicate files and storage bloat. Produce a clear XLSX report that helps the user decide what to review. This is a **read-only** workflow.
 
-## Why this exists
+## Non-negotiable safety boundary
 
-"My Drive is full of duplicates" is one of the most common storage complaints there is, and it's
-usually caused by the same handful of patterns: a folder got copied wholesale into a sibling
-folder at some point, an old computer or account backup got dumped into Drive and overlaps with
-what's already there, or the same photo/video library got exported/extracted more than once.
-None of that requires exotic tooling to find — it requires enumerating everything and looking
-for content that matches, at a scale a human won't do by hand.
+Never delete, trash, move, rename, edit, share, or otherwise modify a Google Drive file or folder.
 
-## Method
+Do not offer to perform cleanup after the report. If the user asks to remove files, explain that this skill only provides an audit and they must take any cleanup action themselves in Google Drive or use a separately approved workflow.
 
-This applies the core idea professional deduplication and backup systems use — fingerprint
-content and bucket by the fingerprint instead of comparing every file to every other file — so
-the process runs in roughly linear time rather than quadratic.
+## When to use
 
-What this skill does, in order:
+Use for requests such as:
 
-1. **Fingerprint by exact byte size, drive-wide.** Enumerate every file (via the Google Drive
-   connector's `search_files`, paginating with `parentId` recursion from the Drive root — see
-   "Gathering the data" below) and group them by exact `fileSize`. A byte-for-byte size match
-   between two files in *unrelated* folders is a strong signal — for anything above a trivial
-   size, an accidental collision is statistically implausible. This is the same size-prefilter
-   real dedup engines use before doing full content hashing, because hashing everything is the
-   expensive step even for them.
-2. **Split by confidence.** Files ≥100KB (or smaller files whose names are clear variants of each
-   other, e.g. `IMG_0431.MOV` vs `IMG_0431 (1).MOV`) are treated as high-confidence duplicates.
-   Files below that size with unrelated names are set aside for manual review — at a few bytes to
-   a few KB, unrelated files can coincidentally share a byte count (ten different tiny text
-   files can all happen to be exactly 6 bytes), so don't auto-act on those. `scripts/dedupe_drive.py`
-   implements this split; do not skip it when adapting the logic.
-3. **Report before touching anything.** Build an XLSX (via the `xlsx` skill/openpyxl) with: a
-   summary of what was found, the duplicate clusters sorted by reclaimable space, the largest
-   individual files (the "cold storage" angle — big + untouched in years is often a faster win
-   than dedup), and a folder-level rollup showing where the space actually is. Send this to the
-   user. Do not delete anything yet.
-4. **Get explicit, itemized approval.** Tell the user what you're proposing to remove and how
-   much space it frees, and wait for a clear go-ahead. Never infer approval from an earlier,
-   more general statement like "clean up my drive" — the report is what makes the specific
-   decision informed.
-5. **Remove in small, visible batches — never mass, unattended deletion.** Even though the
-   destination is Trash (recoverable), moving thousands of files in one unattended, fully
-   automated sweep is a large blast radius for a mistake to hide in, and some environments'
-   safety layers will (correctly) push back on many parallel agents doing bulk destructive
-   actions at once. Do the actual trashing yourself, directly, in batches of a few dozen to a
-   few hundred, and check in with progress between batches rather than firing off many parallel
-   subagents to do it all at once unattended.
+- “My Google Drive is full.”
+- “Find duplicate files in my Drive.”
+- “Audit our shared Drive before a migration.”
+- “Where is our Google Drive storage going?”
 
-## Scope & limitations
+## Workflow
 
-Duplicate detection here is based on exact file-size fingerprinting plus filename-pattern
-matching, not full cryptographic content hashing of every file. This is what makes it practical
-to run against a full account in one sitting, and it is well-suited as a first-pass audit and
-triage tool. It is not equivalent to enterprise block-level deduplication systems (content-defined
-chunking with inline cryptographic hashing on dedicated storage hardware) — organizations needing
-forensic-grade, byte-verified duplicate proof at petabyte scale should use a purpose-built
-enterprise dedup or backup platform instead. Google-native documents (Docs, Sheets, Slides) have
-no byte size and are excluded from size-based clustering.
+1. **Confirm the scope.** State that the audit is read-only and will not alter the Drive. Clarify whether to inspect the accessible Drive root, a named folder, or the files visible to the connector.
+2. **Gather metadata only.** Use the configured Google Drive connector’s safe listing and search operations. Collect available file metadata such as ID, title, MIME type, byte size, path or parent, created/modified time, and owner where available. Do not call any connector operation that changes Drive data or permissions.
+3. **Record coverage.** Note inaccessible folders, unsupported file types, missing file sizes, pagination limits, and any connector limitations.
+4. **Identify likely duplicates.**
+   - Group files by exact byte size.
+   - Treat groups of files at least 100 KB as likely duplicate candidates when their names or locations support the finding.
+   - Flag small or unrelated-name size matches as low confidence, never as confirmed duplicates.
+   - Exclude Google-native Docs, Sheets, and Slides from size-based clustering when no byte size is available.
+5. **Run the local analysis.** When metadata has been saved as JSONL, run:
 
-## Gathering the data
-
-This skill assumes a Google Drive MCP connector is available (tools typically named
-`mcp__Google_Drive__search_files`, `get_file_metadata`, `trash_file`). Enumerate with a query
-like `owner = 'me' and mimeType != 'application/vnd.google-apps.folder'`, paginating with
-`pageToken`/`nextPageToken`. For very large drives, a single top-down crawl can exceed one
-session's practical limits — it's fine (and often necessary) to split the crawl across several
-parallel research/sub-agent tasks by top-level folder, each collecting
-`id, title, fileSize, mimeType, parentId, createdTime, modifiedTime, viewedByMeTime` for every
-file, then merge their output into one dataset before clustering. `scripts/dedupe_drive.py`
-expects that merged dataset as a JSONL file, one file record per line, with a `path` field
-(full folder path including filename).
-
-If a crawl gets interrupted (rate limits, session limits, timeouts), that's normal at scale —
-resume it rather than starting over; don't silently drop partial results.
-
-## Running the analysis
-
-```
+```bash
 python3 scripts/dedupe_drive.py --input files.jsonl --out report.xlsx
 ```
 
-See `scripts/dedupe_drive.py` for the clustering logic and report structure — read it before
-adapting this skill to a different connector or storage backend, since the confidence-tiering
-in step 2 above is the part most worth preserving exactly.
+6. **Deliver an XLSX report.** Include, where data allows:
+   - Summary and coverage notes
+   - Duplicate clusters, confidence, and estimated reclaimable space
+   - Folder rollup
+   - Largest individual files
+   - Likely wholesale folder duplication
+   - Coverage and gaps
+   - A prioritised action plan labelled as recommendations only
+7. **Explain limitations.** File-size and filename patterns are triage signals, not cryptographic proof of identical contents. Recommend that users verify high-impact findings before they take action themselves.
 
-## Safety rules (do not skip these)
+## Reporting language
 
-- Read-only until the report is delivered and the user has explicitly approved specific items.
-- Deletions go to Trash, never permanent delete — say so explicitly when asking for approval.
-- Never bulk-delete via many parallel unattended agents; do it yourself, in small batches, with
-  visible progress.
-- Low-confidence (small, unrelated-name) matches are for the user's manual review, not automatic
-  action.
-- If you're not certain a "confirmed" duplicate really is one (e.g. its size is suspiciously
-  common, or the filenames suggest genuinely different content), say so rather than including it
-  in a bulk-approval batch.
+Use “likely duplicate,” “candidate,” and “recommendation” unless byte-identical proof is available from a separate, explicitly approved verification process. Never imply that a file was removed or that the audit frees space.
+
+## Output
+
+Return the XLSX report and a concise summary of:
+
+- total files and folders covered;
+- potential duplicate clusters and estimated space impact;
+- low-confidence findings requiring manual review; and
+- coverage gaps or limitations.
+
+## Privacy
+
+Do not expose file names, paths, ownership details, or report contents beyond the user’s current conversation and the approved local report artifact.
