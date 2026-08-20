@@ -19,15 +19,13 @@ what's already there, or the same photo/video library got exported/extracted mor
 None of that requires exotic tooling to find — it requires enumerating everything and looking
 for content that matches, at a scale a human won't do by hand.
 
-## Method (and what it honestly is/isn't)
+## Method
 
-This borrows the core idea professional deduplication and backup systems use — fingerprint
-content and bucket by the fingerprint instead of comparing every file to every other file — but
-it is **not** the same thing as enterprise block-level dedup (Data Domain, Commvault, etc.),
-which does content-defined chunking and cryptographic hashing across the wire in specialized
-storage hardware. Be upfront about that difference if a user or reader asks how this compares.
+This applies the core idea professional deduplication and backup systems use — fingerprint
+content and bucket by the fingerprint instead of comparing every file to every other file — so
+the process runs in roughly linear time rather than quadratic.
 
-What this skill actually does, in order:
+What this skill does, in order:
 
 1. **Fingerprint by exact byte size, drive-wide.** Enumerate every file (via the Google Drive
    connector's `search_files`, paginating with `parentId` recursion from the Drive root — see
@@ -58,6 +56,17 @@ What this skill actually does, in order:
    actions at once. Do the actual trashing yourself, directly, in batches of a few dozen to a
    few hundred, and check in with progress between batches rather than firing off many parallel
    subagents to do it all at once unattended.
+
+## Scope & limitations
+
+Duplicate detection here is based on exact file-size fingerprinting plus filename-pattern
+matching, not full cryptographic content hashing of every file. This is what makes it practical
+to run against a full account in one sitting, and it is well-suited as a first-pass audit and
+triage tool. It is not equivalent to enterprise block-level deduplication systems (content-defined
+chunking with inline cryptographic hashing on dedicated storage hardware) — organizations needing
+forensic-grade, byte-verified duplicate proof at petabyte scale should use a purpose-built
+enterprise dedup or backup platform instead. Google-native documents (Docs, Sheets, Slides) have
+no byte size and are excluded from size-based clustering.
 
 ## Gathering the data
 
