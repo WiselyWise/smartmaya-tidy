@@ -60,6 +60,15 @@ runs in roughly linear time rather than quadratic:
    approves specific items. Removal happens in small, visible batches to Trash — recoverable for
    about 30 days.
 
+   Here's what that report actually looks like — the **Duplicate Clusters** tab (exact file IDs, with a
+   recommended keep/trash split per cluster) and the **Folder Rollup** tab (where space is concentrated,
+   at a glance):
+
+   <p float="left">
+     <img src="images/tab_Duplicate_Clusters.png" width="49%" alt="Duplicate Clusters tab" />
+    <img src="images/tab_Folder_Rollup.png" width="49%" alt="Folder Rollup tab" />
+  </p>
+
 ## Scope & limitations
 
 - Duplicate detection is based on exact file-size fingerprinting plus filename-pattern matching, not
@@ -79,6 +88,31 @@ runs in roughly linear time rather than quadratic:
 In an end-to-end test run against a real Google Drive account (~50,000 files, ~700GB), this
 methodology identified **127.85GB of confirmed, high-confidence reclaimable duplicate storage across
 7,811 clusters — approximately 18% of total storage audited.**
+
+![Summary tab from that run](images/tab_Summary.png)
+
+## Example report
+
+The XLSX report Claude hands back has seven tabs. Beyond the Summary, Duplicate Clusters, and Folder
+Rollup shown above:
+
+- **Top Space Hogs** — the largest individual files, useful even outside exact duplicates (old backups
+  that just never got cleaned up).
+- **Wholesale Folder Duplication** — entire folder trees that were copied wholesale into a sibling
+  folder, which is often a bigger win than dedup at the individual-file level.
+- **Coverage & Gaps** — exactly what was and wasn't swept, so the audit's real boundaries are explicit
+  rather than implied.
+- **Action Plan** — every finding prioritized by GB impact, so approving cleanup is a quick
+  top-to-bottom pass instead of hunting through tabs.
+
+<p float="left">
+  <img src="images/tab_Top_Space_Hogs.png" width="49%" alt="Top Space Hogs tab" />
+  <img src="images/tab_Wholesale_Folder_Duplication.png" width="49%" alt="Wholesale Folder Duplication tab" />
+</p>
+<p float="left">
+  <img src="images/tab_Coverage_and_Gaps.png" width="49%" alt="Coverage & Gaps tab" />
+  <img src="images/tab_Action_Plan.png" width="49%" alt="Action Plan tab" />
+</p>
 
 ## Install
 
